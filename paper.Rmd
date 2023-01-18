@@ -27,8 +27,9 @@ set.seed(100)
 
 # Basic usage
 
-Let's mock up some data for a multiplexed FISH experiment.
-This consists of a `DataFrame` (Bioconductor's wrapper around the base `data.frame` class) where each row contains the coordinates of a single detected transcript molecule in a particular cell.
+To demonstrate the use of the `BumpyMatrix` class, let's mock up some data for a multiplexed RNA fluorescence _in situ_ hybridization (RNA-FISH) experiment.
+Our data consists of a `DataFrame` (Bioconductor's wrapper around the base `data.frame` class) where each row contains the coordinates of a single detected transcript molecule.
+We assume that demultiplexing and cell segmentation have already been performed, such that each detected molecule is also annotated with its gene identity and its cell of origin.
 
 ```{r}
 library(S4Vectors)
@@ -40,9 +41,8 @@ df <- DataFrame(
 df
 ```
 
-We use the `splitAsBumpyMatrix()` function to create a `BumpyDataFrameMatrix` where the rows are genes and the columns are cells.
-Each entry of this `BumpyDataFrameMatrix` is itself a `DataFrame` that corresponds to a particular gene/cell combination,
-and containing the x/y-coordinates for all transcript molecules of that gene in that cell.
+We use the `splitAsBumpyMatrix()` function to create a `BumpyDataFrameMatrix`, a 2-dimensional matrix abstraction where the rows are genes and the columns are cells.
+Each entry of this `BumpyDataFrameMatrix` is itself a `DataFrame` that corresponds to a particular gene/cell combination and contains the x/y-coordinates for all transcript molecules of that gene in that cell.
 Each `DataFrame` may have zero, one or multiple rows, depending on the cell's expression of the gene.
 
 ```{r}
@@ -51,7 +51,7 @@ mat <- splitAsBumpyMatrix(df[,c("x", "y")], row=df$gene, column=df$cell)
 mat
 ```
 
-We can now treat `mat` in the same manner as any other matrix-like R object.
+We can now manipulate `mat` in the same manner as any other matrix-like R object.
 For example, we can slice by row and column, equivalent to filtering our original `df` by gene or cell respectively.
 
 ```{r}
@@ -146,8 +146,8 @@ x_cell <- rnorm(ncol(mat))
 y_cell <- rnorm(ncol(mat))
 
 # Computing the Euclidean distance of each transcript from the centroid.
-# Transpositions are necessary to ensure that the cell centroid coordinates
-# are recycled along the cells, not along the features.
+# Transpositions ensure that the cell centroid coordinates are recycled along
+# the cells, not along the features.
 squared_x <- (t(mat[,,"x"]) - x_cell)^2 
 squared_y <- (t(mat[,,"y"]) - y_cell)^2
 dist <- t(sqrt(squared_x + squared_y))
@@ -166,6 +166,8 @@ keep
 filtered <- mat[keep]
 filtered
 ```
+
+# Examples of other applications
 
 # References
 

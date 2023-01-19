@@ -28,20 +28,21 @@ Obvious examples of this paradigm include gene-by-sample expression matrices for
 A more sophisticated example is the `SummarizedExperiment` class [@huber2015orchestrating], a data structure that contains any number of assay matrices, feature- and sample-level annotations as well as any additional metadata for a dataset.
 The `SummarizedExperiment` is a popular representation for genomics data, serving as the cornerstone of a wide variety of analysis pipelines ranging from RNA sequencing, epigenomics, single-cell analyses and more.
 
-However, not all types of experimental data can be easily inserted into a `SummarizedExperiment`.
-The use of assay matrices assumes that each feature/sample combination has one experimental observation (or zero observations, if missing values are allowed in the matrix).
+Not all types of experimental data can be easily inserted into a `SummarizedExperiment`.
+The use of assay matrices typically assumes that each feature/sample combination has one experimental observation (or zero observations, if missing values are allowed in the matrix).
 It is more difficult to store data types where each feature/sample combination is associated with multiple observations.
-Our motivating example is that of a highly multiplexed RNA fluorescence _in situ_ hybridization (RNA-FISH) experiment [@moffitt2016highthroughput;@eng2019transcriptome]. 
+An excellent example is the data generated from a highly multiplexed RNA fluorescence _in situ_ hybridization (RNA-FISH) experiment [@moffitt2016highthroughput;@eng2019transcriptome]. 
 Here, the features are genes, the samples are cells, and each gene/cell combination is associated with spatial coordinates for zero, one or multiple transcript molecules.
+We would like to hold onto these coordinates throughout the analysis as they are potentially useful in downstream steps, e.g., for visualization, diagnostics or investigation of subcellular localization.
 
-The RNA-FISH transcript coordinate data has no obvious location inside the `SummarizedExperiment`.
+Unfortunately, the RNA-FISH transcript coordinate data has no obvious location inside the `SummarizedExperiment`.
 We cannot store it in the assays as it cannot be represented as an ordinary R matrix. 
 We might consider grouping the coordinates by cell and storing them in the sample-level annotations, but this would mean that any feature-level slicing of the `SummarizedExperiment` would not be propagated to the transcript coordinates.
 (And vice versa for storing them in the feature-level annotations, whereupon they would not respond to any sample-level slicing.)
 This negates one of the major advantages of the `SummarizedExperiment` concept - that any operations applied to a `SummarizedExperiment` will propagate across all assays and annotations contained within,
-ensuring synchronization and avoiding common book-keeping errors throughout the course of an analysis, e.g., using the single-cell workflow described by @amezquita2020orchestrating.
+ensuring synchronization and avoiding common book-keeping errors throughout the course of an analysis such as the single-cell workflow described by @amezquita2020orchestrating.
 
-Here, we describe the `BumpyMatrix` class, implemented in the Bioconductor package of the same name.
+Here, we describe the `BumpyMatrix` class, implemented in the Bioconductor package of the same name [@bumpymatrix].
 This class implements a 2-dimensional array where each entry is a non-scalar object of the same type (e.g., atomic vectors, data frames) in contrast to ordinary R matrices where each entry is an atomic scalar.
 An instance of a `BumpyMatrix` class can then be stored as an assay of a `SummarizedExperiment` for synchronized manipulation of the entire dataset.
 We demonstrate the use of the `BumpyMatrix` for storing and manipulating some mock RNA-FISH data.
@@ -119,11 +120,11 @@ assay(sub.se, "positions")
 ```
 
 This compatibility also simplifies the consumption of `BumpyDataFrameMatrix` assays by frameworks that operate on a `SummarizedExperiment`.
-For example, the **alabaster** framework provides a mechanism for serializing R/Bioconductor objects into language-agnostic file formats, for use with other programming ecosystems like Python or Javascript.
+For example, the **alabaster** framework [@alabaster] provides a mechanism for serializing R/Bioconductor objects into language-agnostic file formats, for use with other programming ecosystems like Python or Javascript.
 As **alabaster** already provides a mechanism to serialize `SummarizedExperiment` objects to file, it can be easily extended to handle objects containing `BumpyDataFrameMatrix` objects in its assays.
 
 ```{r}
-library(alabaster.se) # TODO: change to the alabaster umbrella.
+library(alabaster) 
 
 # Saving the SummarizedExperiment into a staging directory.
 staging <- tempfile()
@@ -137,7 +138,7 @@ assay(reloaded, "positions")
 
 # Other `BumpyMatrix` subclasses
 
-While we have largely focused on the `BumpyDataFrameMatrix`, the _BumpyMatrix_ package also supports other `BumpyMatrix` subclasses.
+While we have largely focused on the `BumpyDataFrameMatrix`, the `r Biocpkg("BumpyMatrix")` package also supports other `BumpyMatrix` subclasses.
 For example, the `BumpyNumericMatrix` class implements a matrix-like object where each entry is a numeric vector of any length.
 To illustrate, we can generate a `BumpyNumericMatrix` instance by extracting the x-coordinates from `mat`.
 
@@ -187,7 +188,58 @@ filtered <- mat[keep]
 filtered
 ```
 
+# Implementation details
+
+The `BumpyMatrix` classes are based on the `CompressedList` structure from the `r Biocpkg("IRanges")` package [@lawrence2013software].
+This structure is effectively defined as a list of contiguous views into a "vector-like object" -
+for example, the `SplitDataFrameList` is a list of views into a single `DataFrame` where each view consists of a subset of rows.
+Similarly, the `CompressedNumericList` consists of a single numeric vector where each view defines a contiguous slice along the vector.
+The use of a single vector-like object enables efficient vectorization when performing operations on the `CompressedList`.
+The `BumpyMatrix` can subsequently be considered a 2-dimensional extension of the `CompressedList`,
+providing the expected methods for matrix operations, e.g., slicing by rows and columns.
+
+In principle, the `BumpyMatrix` concept can be extended to any "vector-like" object.
+This refers to any object that has a concept of its own length and contains a sequence of extractable elements.
+For example, the `GRanges` class complies with the expectations of an abstract vector,
+so one could imagine representing a two-dimensional array of genomic ranges by creating a `BumpyGRangesMatrix` class.
+In practice, any such implementation would require the definition of an existing `CompressedList` of the desired vector-like class.
+(Fortunately, the `GRangesList` class is already implemented as a `CompressedList` of `GRanges`, so a `BumpyGRangesMatrix` could build on top of that.)
+
+The `BumpyMatrix` class implements a transparent optimization when the data is "sparse", i.e., some of the vector-like objects in the entries have zero length.
+In a naive implementation, the underlying `CompressedList` would have to store a 0-length view for those entries.
+This may consume too much memory for a very large sparse matrix given that each view needs memory to hold its start and end positions.
+Instead, the `BumpyMatrix` only keeps track of its non-zero-length entries,
+in a manner similar to the compressed sparse column matrices from the `r CRANpkg("Matrix")` package [@matrix].
+This allows the creation of very large `BumpyMatrix` objects where data is only present in a small proportion of entries.
+
+Incidentally, the "bumpy" name is inspired by the 3-dimensional visualization of a `BumpyMatrix` structure.
+Image that one dimension consists of the rows, another dimension consists of the columns, and the length of the non-scalar objects projects into the third dimension.
+As the lengths are variable, this creates a bumpy surface along the plane defined by the first two dimensions.
+One can also imagine this as a 3-dimensional extension of a ragged array,
+though we did not use "ragged" so as to avoid confusion with the (rather different) `r Biocpkg("RaggedExperiment")` package.
+
 # Examples of other applications
+
+We use the `BumpyMatrix` concept for a variety of in-house applications beyond spatial transcriptomics.
+Much of this is driven by the fact that our internal databases and workflows are heavily focused on the `SummarizedExperiment` paradigm.
+Thus, it is convenient to store as much data as possible inside a `SummarizedExperiment`, for maximum compatibility with our existing data infrastructure.
+
+One example of our `SummarizedExperiment`-centric approach is our handling of drug response data across different cell lines.
+In this case, each drug is a "feature" and each cell line is a sample, and the `SummarizedExperiment` is used to store matrices of IC~50~, E~max~ and more advanced metrics [@hafner2016growth] for each drug/cell line combination.
+This representation is convenient as it allows us to easily cross-reference the columns with other `SummarizedExperiment` objects containing genotyping and expression information for the same cell lines.
+The drug response metrics are derived from raw data - namely, the cell count across a range of drug concentrations and time points.
+We also want to store the raw data in the `SummarizedExperiment` as it is useful for plotting and diagnostics during interactive examination of the dataset.
+This is easily accommodated as a `BumpyDataFrameMatrix` assay where each entry is a `DataFrame` containing the cell count data at each time and dosage.
+
+We also use the `BumpyDataFrameMatrix` to store immune repertoire sequencing datasets.
+Here, each column is a sample (or cell, for single-cell repertoire sequencing experiments) and each feature is a locus of interest, e.g., IGH, TCRA.
+Each data frame stores all detected sequences of that locus along with associated information from the AIRR standard [@vander2018airr].
+This representation is convenient as it allows us to store the repertoire data in a `MultiAssayExperiment` [@ramos2017software],
+where the samples can be cross-referenced to other `SummarizedExperiment` objects containing, e.g., expression data for the same samples.
+
+# Acknowledgements
+
+Thanks to Marc Hafner, whose problem with the representation of drug response data motivated the development of the `BumpyMatrix` in the first place.
 
 # References
 

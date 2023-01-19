@@ -21,13 +21,35 @@ knitr::opts_chunk$set(error=FALSE, warning=FALSE, message=FALSE, collapse=TRUE)
 set.seed(100)
 ```
 
-# Summary
+# Introduction
 
-# Statement of need
+Many bioinformatics workflows in the R/Bioconductor ecosystem are based on a 2-dimensional data representation where one dimension corresponds to features and the other dimension corresponds to samples.
+Obvious examples of this paradigm include gene-by-sample expression matrices for transcriptome profiling experiments, peak-by-sample matrices from ChIP-seq experiments, and gene-by-cell count matrices for single-cell RNA-seq experiments.
+A more sophisticated example is the `SummarizedExperiment` class, a data structure that contains any number of assay matrices, feature- and sample-level annotations as well as any additional metadata for a dataset.
+The `SummarizedExperiment` is a popular representation for genomics data, serving as the cornerstone of a wide variety of analysis pipelines ranging from RNA sequencing, epigenomics, single-cell analyses and more.
+
+However, not all types of experimental data can be easily inserted into a `SummarizedExperiment`.
+The use of assay matrices assumes that each feature/sample combination has one experimental observation (or zero observations, if missing values are allowed in the matrix).
+It is more difficult to store data types where each feature/sample combination is associated with multiple observations.
+Our motivating example is that of a highly multiplexed RNA fluorescence _in situ_ hybridization (RNA-FISH) experiment.
+Here, the features are genes, the samples are cells, and each gene/cell combination is associated with spatial coordinates for zero, one or multiple transcript molecules.
+
+The RNA-FISH transcript coordinate data has no obvious location inside the `SummarizedExperiment`.
+We cannot store it in the assays as it cannot be represented as an ordinary R matrix. 
+We might consider grouping the coordinates by cell and storing them in the sample-level annotations, but this would mean that any feature-level slicing of the `SummarizedExperiment` would not be propagated to the transcript coordinates.
+(And vice versa for storing them in the feature-level annotations, whereupon they would not respond to any sample-level slicing.)
+This negates one of the major advantages of the `SummarizedExperiment` concept - that any operations applied to a `SummarizedExperiment` will propagate across all assays and annotations contained within,
+ensuring synchronization and avoiding common book-keeping errors throughout the course of an analysis.
+
+Here, we describe the `BumpyMatrix` class, implemented in the Bioconductor package of the same name.
+This class implements a 2-dimensional array where each entry is a non-scalar object of the same type (e.g., atomic vectors, data frames) in contrast to ordinary R matrices where each entry is an atomic scalar.
+An instance of a `BumpyMatrix` class can then be stored as an assay of a `SummarizedExperiment` for synchronized manipulation of the entire dataset.
+We demonstrate the use of the `BumpyMatrix` for storing and manipulating some mock RNA-FISH data.
+We also discuss some other bioinformatics applications that can benefit from the `BumpyMatrix` concept.
 
 # Basic usage
 
-To demonstrate the use of the `BumpyMatrix` class, let's mock up some data for a multiplexed RNA fluorescence _in situ_ hybridization (RNA-FISH) experiment.
+To demonstrate the use of the `BumpyMatrix` class, let's mock up some data for a multiplexed RNA-FISH experiment.
 Our data consists of a `DataFrame` (Bioconductor's wrapper around the base `data.frame` class) where each row contains the coordinates of a single detected transcript molecule.
 We assume that demultiplexing and cell segmentation have already been performed, such that each detected molecule is also annotated with its gene identity and its cell of origin.
 
@@ -81,9 +103,7 @@ counts[1:10,1:5]
 # Compatibility with the `SummarizedExperiment`
 
 Of particular interest is the ability to store `mat` inside Bioconductor's `SummarizedExperiment` data structure.
-The `SummarizedExperiment` provides a holistic representation of a dataset that contains all experimental assays, feature- and sample-level annotations as well as additional metadata. 
-This representation is convenient as it ensures that any operations are synchronised across all aspects of the dataset, avoiding any account-keeping errors across the lifetime of an analysis workflow.
-By storing the `BumpyDataFrameMatrix` inside the `SummarizedExperiment`, we can synchronise the manipulations of the transcript coordinates to the rest of the dataset.
+This allows us to synchronise the manipulations of the transcript coordinates to the rest of the dataset.
 
 ```{r}
 library(SummarizedExperiment)
